@@ -1,5 +1,23 @@
+# Credentials and Secrets
 .env
+
+# Python Virtual Environment
+swat_env/
+venv/
+env/
+
+# Python Cache & Compiled Files
 __pycache__/
-.venv/
-.antigravity/
 *.pyc
+*.pyo
+*.pyd
+
+# Local Databases / Storage
+qdrant_storage/
+*.db
+*.sqlite
+
+# IDE & System Files
+.vscode/
+.idea/
+.DS_Store

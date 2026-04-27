@@ -6,134 +6,85 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Client setup using your specific credentials
+# Client Setup
 client = AzureOpenAI(
     api_key=os.getenv("AZURE_OPENAI_API_KEY"),
     api_version=os.getenv("AZURE_OPENAI_API_VERSION"),
     azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT")
 )
 
-q_client = QdrantClient(url="http://localhost:6333")
+q_client = QdrantClient("localhost", port=6333)
 COLLECTION_NAME = "axion_governance"
 
 def run_sentinel_audit(source_text, channel="LinkedIn post", audience="Executive"):
     context_rules = "No specific rules found."
     
-    # --- 1. EMBEDDING & SEARCH (Ensuring 4-space indentation) ---
+    # 1. VECTOR SEARCH (RAG)
     try:
-        embedding_response = client.embeddings.create(
+        emb_res = client.embeddings.create(
             input=source_text,
             model=os.getenv("AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT")
         )
-        search_emb = embedding_response.data[0].embedding
+        vector = emb_res.data[0].embedding
 
         search_results = q_client.query_points(
             collection_name=COLLECTION_NAME,
-            query=search_emb,
+            query=vector,
             limit=5
         )
         
         if search_results.points:
+            # Match the keys from your ingestion file ('rule_text' and 'section')
             context_rules = "\n".join([
-                f"- {h.payload['rule_text']} (Ref: {h.payload['section']})" 
+                f"- {h.payload.get('rule_text')} (Ref: {h.payload.get('section')})" 
                 for h in search_results.points
             ])
     except Exception as e:
         print(f"⚠️ Search failed: {e}")
 
-    # --- 2. MAPS ---
+    # 2. PERSONA MAPS
     channel_map = {
-        "LinkedIn post": "Punchy, short, emojis.",
-        "Marketing email": "Direct, personal, CTA.",
-        "Press Release": "Formal, 3rd person."
+        "LinkedIn post": "Format: Punchy, high white-space, 2 emojis. Social tone.",
+        "Marketing email": "Format: Personal, direct, clear CTA. Warm tone.",
+        "Press Release": "Format: AP Style, objective, 3rd person. Institutional tone."
     }
     audience_map = {
-        "Executive": "ROI/Strategy.",
-        "Practitioner": "Workflows.",
-        "Technical Lead": "Architecture."
+        "Executive": "Focus: ROI, Strategy, Market Outcomes.",
+        "Practitioner": "Focus: Workflow, Speed, Ease of Use.",
+        "Technical Lead": "Focus: Scalability, Security, Architecture."
     }
 
-    # --- 3. THE SYSTEM PROMPT (Fixed Indentation) ---
+    # 3. SYSTEM PROMPT
     system_prompt = f"""
     You are the Axion Brand Sentinel.
-    Rules: {context_rules}
-    Pivot for: {audience} on {channel}.
-    Guidelines: {channel_map.get(channel)} | {audience_map.get(audience)}
     
-    Return JSON only:
+    TARGET: {channel} for {audience}.
+    RULES: {context_rules}
+    TONE GUIDE: {channel_map.get(channel)} | {audience_map.get(audience)}
+
+    TASK:
+    1. Identify violations. Categorize as: Terminology, Tone, Legal, or Formatting.
+    2. Assign an 'impact_score' (1-10) per violation.
+    3. Rewrite the text to be 100% compliant.
+
+    RETURN JSON ONLY:
     {{
         "brand_health_score": int,
-        "violations": [{{ "rule_id": "str", "text_found": "str", "fix": "str" }}],
+        "violations": [
+            {{ "category": "str", "impact_score": int, "rule_id": "str", "text_found": "str", "fix": "str" }}
+        ],
         "adapted_text": "str",
+        "retrieved_context": "{context_rules}",
         "change_log": [{{ "from": "str", "to": "str", "reason": "str" }}]
     }}
     """
 
-    # --- 4. LLM CALL ---
     try:
         response = client.chat.completions.create(
             model=os.getenv("AZURE_OPENAI_DEPLOYMENT"),
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": source_text}
-            ],
+            messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": source_text}],
             response_format={"type": "json_object"}
         )
         return json.loads(response.choices[0].message.content)
     except Exception as e:
-        print(f"❌ LLM Error: {e}")
-        return {"brand_health_score": 0, "violations": [], "adapted_text": "Error", "change_log": []}
-
-    # 3. 9-Combination Persona Logic
-    channel_map = {
-        "LinkedIn post": "Short, bold chunks. 2 emojis. Use white space.",
-        "Marketing email": "Personal tone. Focus on 'You'. Clear CTA.",
-        "Press Release": "Formal, objective, 3rd person. No emojis."
-    }
-    audience_map = {
-        "Executive": "Focus on ROI & Market Strategy.",
-        "Practitioner": "Focus on daily efficiency & ease.",
-        "Technical Lead": "Focus on scalability & architecture."
-    }
-
-    system_prompt = f"""
-     You are a Senior Brand Consultant for Axion. 
-    
-     CONTEXT: {channel} for {audience}.
-     RULES: {context_rules}
-    
-     TASKS:
-     1. Identify violations.
-     2. Rewrite content.
-     3. EXPLAIN: For every change, provide a 'reason' that explains the strategic impact (e.g., 'Removing jargon to increase executive trust').
-    
-    OUTPUT JSON:
-    {{
-        "brand_health_score": int,
-        "violations": [...],
-        "adapted_text": "...",
-        "change_log": [
-            {{ "from": "str", "to": "str", "reason": "Strategic explanation here" }}
-        ]
-    }}
-    """
-
-    # 5. Chat Completion logic using your specific deployment name
-    try:
-        response = client.chat.completions.create(
-            model=os.getenv("AZURE_OPENAI_DEPLOYMENT"),
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": source_text}
-            ],
-            response_format={"type": "json_object"}
-        )
-        return json.loads(response.choices[0].message.content)
-    except Exception as e:
-        print(f"❌ LLM ERROR: {e}")
-        return {
-            "brand_health_score": 0,
-            "violations": [{"rule_id": "ERR", "text_found": "N/A", "fix": str(e)}],
-            "adapted_text": "Connection Error. Check terminal.",
-            "change_log": []
-        }
+        return {"brand_health_score": 0, "violations": [], "adapted_text": f"Error: {str(e)}", "retrieved_context": context_rules}

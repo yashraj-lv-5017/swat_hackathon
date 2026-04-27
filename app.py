@@ -41,43 +41,57 @@ source_text = st.text_area(
     placeholder="Enter the text you want to audit here..."
 )
 
-if st.button("🚀 Run Audit & Adaptation"):
+if st.button("🚀 Run Enterprise Audit"):
     if not source_text.strip():
         st.warning("Please enter some text to audit.")
     else:
-        with st.spinner("Sentinel is auditing against brand guidelines..."):
+        with st.spinner("Sentinel is performing a deep-governance audit..."):
             try:
                 # Run the engine
                 report = run_sentinel_audit(source_text, channel, audience)
                 
-                # Layout for Results
-                col1, col2 = st.columns([1, 1])
+                # --- NEW IMPACTFUL UI SECTION ---
+                
+                # 1. High-Level Metrics
+                # We pull the score directly from GPT-5.4's reasoning
+                score = report.get('brand_health_score', 0)
+                
+                col_m1, col_m2, col_m3 = st.columns(3)
+                col_m1.metric("Brand Health Score", f"{score}%", delta=f"{score-100}%", delta_color="inverse")
+                col_m2.metric("Violations Flagged", len(report['violations']))
+                col_m3.metric("Logic Engine", "GPT-5.4 + RAG")
 
-                with col1:
-                    st.success("✅ Compliance Audit Complete")
-                    st.write("### 🚩 Rule Violations")
-                    if report['violations']:
-                        st.table(report['violations'])
-                    else:
-                        st.write("No violations found! The text is brand-compliant.")
+                st.divider()
 
-                    st.write("### 📝 Change Log")
+                # 2. Side-by-Side Comparison (The "Wow" Factor)
+                st.subheader("🔄 Content Transformation")
+                diff_left, diff_right = st.columns(2)
+                
+                with diff_left:
+                    st.markdown("#### ❌ Original Draft")
+                    st.info(source_text)
+                
+                with diff_right:
+                    st.markdown("#### ✅ Sentinel Optimized")
+                    st.success(report['adapted_text'])
+
+                # 3. Detailed Rule Citations
+                st.subheader("🚩 Compliance Details")
+                st.table(report['violations'])
+
+                # 4. Technical Traceability (Show the judges how it works)
+                with st.expander("See Reasoning Trace & Change Log"):
                     st.json(report['change_log'])
 
-                with col2:
-                    st.info(f"✨ Adapted for {channel}")
-                    st.write("### Final Content")
-                    st.markdown(f"```\n{report['adapted_text']}\n```")
-                    
-                    st.download_button(
-                        label="Download Adapted Content",
-                        data=report['adapted_text'],
-                        file_name=f"axion_{channel.lower().replace(' ', '_')}.txt",
-                        mime="text/plain"
-                    )
+                # 5. Export Feature
+                st.download_button(
+                    label="📥 Download Compliance Report",
+                    data=f"Brand Score: {score}%\n\nOriginal Text:\n{source_text}\n\nAdapted Text:\n{report['adapted_text']}",
+                    file_name="axion_audit_report.txt"
+                )
 
             except Exception as e:
-                st.error(f"Error: {e}")
+                st.error(f"Audit Error: {e}")
 
 # Footer
 st.markdown("---")

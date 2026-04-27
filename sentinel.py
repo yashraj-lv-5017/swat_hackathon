@@ -65,10 +65,11 @@ def run_sentinel_audit(source_text, channel="LinkedIn post", audience="Executive
     ### OUTPUT FORMAT:
     You MUST return a valid JSON object:
     {{
+        "brand_health_score": 85, 
         "violations": [
-            {{ "text_found": "original phrase", "rule_id": "§ section", "fix": "the correction" }}
+            {{ "text_found": "phrase", "rule_id": "§ section", "fix": "correction", "severity": "High/Medium" }}
         ],
-        "adapted_text": "The full rewritten content",
+        "adapted_text": "Rewritten content",
         "change_log": [
             {{ "from": "old", "to": "new", "reason": "why" }}
         ]

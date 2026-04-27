@@ -17,17 +17,16 @@ q_client = QdrantClient(url="http://localhost:6333")
 COLLECTION_NAME = "axion_governance"
 
 def run_sentinel_audit(source_text, channel="LinkedIn post", audience="Executive"):
-    context_rules = "No specific rules found in database."
+    context_rules = "No specific rules found."
     
+    # --- 1. EMBEDDING & SEARCH (Ensuring 4-space indentation) ---
     try:
-        # 1. Embedding logic using your specific deployment name
         embedding_response = client.embeddings.create(
             input=source_text,
             model=os.getenv("AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT")
         )
         search_emb = embedding_response.data[0].embedding
 
-        # 2. Qdrant Search
         search_results = q_client.query_points(
             collection_name=COLLECTION_NAME,
             query=search_emb,
@@ -40,7 +39,50 @@ def run_sentinel_audit(source_text, channel="LinkedIn post", audience="Executive
                 for h in search_results.points
             ])
     except Exception as e:
-        print(f"⚠️ Vector Search failed: {e}")
+        print(f"⚠️ Search failed: {e}")
+
+    # --- 2. MAPS ---
+    channel_map = {
+        "LinkedIn post": "Punchy, short, emojis.",
+        "Marketing email": "Direct, personal, CTA.",
+        "Press Release": "Formal, 3rd person."
+    }
+    audience_map = {
+        "Executive": "ROI/Strategy.",
+        "Practitioner": "Workflows.",
+        "Technical Lead": "Architecture."
+    }
+
+    # --- 3. THE SYSTEM PROMPT (Fixed Indentation) ---
+    system_prompt = f"""
+    You are the Axion Brand Sentinel.
+    Rules: {context_rules}
+    Pivot for: {audience} on {channel}.
+    Guidelines: {channel_map.get(channel)} | {audience_map.get(audience)}
+    
+    Return JSON only:
+    {{
+        "brand_health_score": int,
+        "violations": [{{ "rule_id": "str", "text_found": "str", "fix": "str" }}],
+        "adapted_text": "str",
+        "change_log": [{{ "from": "str", "to": "str", "reason": "str" }}]
+    }}
+    """
+
+    # --- 4. LLM CALL ---
+    try:
+        response = client.chat.completions.create(
+            model=os.getenv("AZURE_OPENAI_DEPLOYMENT"),
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": source_text}
+            ],
+            response_format={"type": "json_object"}
+        )
+        return json.loads(response.choices[0].message.content)
+    except Exception as e:
+        print(f"❌ LLM Error: {e}")
+        return {"brand_health_score": 0, "violations": [], "adapted_text": "Error", "change_log": []}
 
     # 3. 9-Combination Persona Logic
     channel_map = {
@@ -54,19 +96,25 @@ def run_sentinel_audit(source_text, channel="LinkedIn post", audience="Executive
         "Technical Lead": "Focus on scalability & architecture."
     }
 
-    # 4. The System Prompt
     system_prompt = f"""
-    You are the Axion Brand Sentinel. 
-    Audit this text based on these rules: {context_rules}
-    Pivot the tone for a {audience} on {channel}.
-    Guidelines: {channel_map.get(channel)} | {audience_map.get(audience)}
+     You are a Senior Brand Consultant for Axion. 
     
-    Return JSON only:
+     CONTEXT: {channel} for {audience}.
+     RULES: {context_rules}
+    
+     TASKS:
+     1. Identify violations.
+     2. Rewrite content.
+     3. EXPLAIN: For every change, provide a 'reason' that explains the strategic impact (e.g., 'Removing jargon to increase executive trust').
+    
+    OUTPUT JSON:
     {{
         "brand_health_score": int,
-        "violations": [{{ "rule_id": "str", "text_found": "str", "fix": "str" }}],
-        "adapted_text": "str",
-        "change_log": []
+        "violations": [...],
+        "adapted_text": "...",
+        "change_log": [
+            {{ "from": "str", "to": "str", "reason": "Strategic explanation here" }}
+        ]
     }}
     """
 

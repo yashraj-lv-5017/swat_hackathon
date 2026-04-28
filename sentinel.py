@@ -22,8 +22,47 @@ except:
 
 COLLECTION_NAME = "axion_governance"
 
+# --- NEW: CHANNEL CONFIGURATION (From Problem Statement Table) ---
+CHANNEL_CONFIG = {
+    "LinkedIn post": {
+        "max": 150, 
+        "style": "1-2 sentences per paragraph, white space between",
+        "cta": ["See it in action", "Book a demo"],
+        "penalty": 20
+    },
+    "Marketing email": {
+        "max": 300, 
+        "style": "2-3 sentences per paragraph",
+        "cta": ["Schedule a demo", "Get started"],
+        "penalty": 20
+    },
+    "Landing page headline": {
+        "max": 10, 
+        "style": "Single sentence",
+        "cta": [],
+        "penalty": 25
+    },
+    "Landing page body": {
+        "max": 200, 
+        "style": "2-3 sentences per paragraph",
+        "cta": ["Book a demo today"],
+        "penalty": 20
+    },
+    "Press release": {
+        "min": 400, "max": 600, 
+        "style": "Standard AP style",
+        "cta": ["NONE"], # Penalize if CTA exists
+        "penalty": 25
+    },
+    "Event abstract": {
+        "min": 75, "max": 100, 
+        "style": "Single paragraph",
+        "cta": [],
+        "penalty": 20
+    }
+}
+
 # --- 2. STAKEHOLDER MATRIX ---
-# These are the hard constraints the AI uses to penalize the score.
 STAKEHOLDER_MATRIX = {
     "Executive": {
         "focus": "High-level ROI and Strategy",
@@ -60,6 +99,10 @@ def run_sentinel_audit(source_text, channel="LinkedIn post", audience="Executive
     start_time = time.time()
     rules_found = 0
     
+    # FETCH NEW LIMITS & STYLE
+    word_count = len(source_text.split())
+    limits = CHANNEL_CONFIG.get(channel, {"min": 0, "max": 2000, "penalty": 0, "style": "Standard", "cta": []})
+    
     # STAGE 1: RAG RETRIEVAL (Fetching Brand Rules from Qdrant)
     if q_client:
         try:
@@ -78,14 +121,19 @@ def run_sentinel_audit(source_text, channel="LinkedIn post", audience="Executive
     constraints = STAKEHOLDER_MATRIX.get(audience)
     current_density = calculate_complexity(source_text)
 
-# STAGE 2: THE 3x3 GOVERNANCE PROMPT
+# STAGE 2: THE 3x3 GOVERNANCE PROMPT (Enriched with Table Logic)
     system_prompt = f"""
-    You are the Axion Brand Sentinel. Your audit must pivot based on the 3x3 Matrix:
+    You are the Axion Brand Sentinel. Your audit must pivot based on the 3x3 Matrix and specific Channel constraints:
     
     1. STAKEHOLDER: {audience} (Focus: {STAKEHOLDER_MATRIX[audience]['focus']})
-    2. CHANNEL: {channel} (Formatting Style: {channel})
+    2. CHANNEL: {channel}
+    3. LENGTH CONSTRAINTS: {limits.get('min', 0)} to {limits['max']} words. (Current Input: {word_count} words).
+    4. STYLE & CTA: Paragraph Style must be '{limits['style']}'. CTA must be from {limits['cta']}.
     
-    SCORING CALIBRATION (Strictly follow this for 3x3 variance):
+    SCORING CALIBRATION:
+    - If word count is outside the {limits.get('min', 0)}-{limits['max']} range, deduct {limits['penalty']} points. (Category: 'Formatting').
+    - If paragraph structure does not match '{limits['style']}', deduct 15 points. (Category: 'Formatting').
+    - If required CTA is missing, or if channel is 'Press Release' and a CTA is present, deduct 20 points. (Category: 'Legal').
     - If {audience} == 'Technical Lead' and {channel} == 'LinkedIn post':
         * Complexity up to 9.0 is ALLOWED. (Reward technical depth).
     - If {audience} == 'Executive' and {channel} == 'Press Release':
@@ -95,11 +143,14 @@ def run_sentinel_audit(source_text, channel="LinkedIn post", audience="Executive
         * Tone must be Action-oriented.
         * Deduct 20 points if 'step-by-step' logic is missing.
 
-    VIOLATION CATEGORIZATION (For Multi-Color Charts):
+    VIOLATION CATEGORIZATION (CRITICAL FOR CHARTS):
     - 'Terminology': Forbidden word usage.
-    - 'Tone': Persona mismatch (e.g., Technical talk to Executive).
-    - 'Legal': Missing mandatory keywords from the matrix.
-    - 'Formatting': Channel mismatch (e.g., too many emojis in a Press Release).
+    - 'Tone': Persona mismatch.
+    - 'Legal': Missing mandatory keywords or CTA violations.
+    - 'Formatting': Channel length mismatch or paragraph style mismatch.
+
+    ADAPTATION:
+    The 'adapted_text' MUST be rewritten to strictly fit within the {limits.get('min', 0)}-{limits['max']} word limit, follow the '{limits['style']}' structure, and include a valid CTA.
 
     RETURN JSON ONLY:
     {{
@@ -127,14 +178,15 @@ def run_sentinel_audit(source_text, channel="LinkedIn post", audience="Executive
         # Change Log Recovery logic (if AI forgets to populate)
         if not report.get('change_log') and report.get('violations'):
             report['change_log'] = [
-                { "from": v.get('text_found', '...'), "to": v.get('fix', 'Fixed'), "reason": v.get('reason'), "rule_cited": "Brand Matrix" } 
+                { "from": "Original Text", "to": "Adapted Governance Text", "reason": v.get('reason')} 
                 for v in report.get('violations', [])
             ]
 
         report["audit_metadata"] = {
             "latency_sec": round(time.time() - start_time, 2),
             "tone_shift": round(new_comp - current_density, 2),
-            "confidence_score": 98 if rules_found > 0 else 65
+            "confidence_score": 98 if rules_found > 0 else 65,
+            "word_count_check": f"{word_count}/{limits['max']} max"
         }
         report["confidence_score"] = report["audit_metadata"]["confidence_score"]
         return report
@@ -144,7 +196,7 @@ def run_sentinel_audit(source_text, channel="LinkedIn post", audience="Executive
         return {
             "brand_health_score": 85, 
             "confidence_score": 50,
-            "violations": [{"category": "System", "impact_score": 5, "reason": "API Handover Error", "fix": "Retry Audit"}],
+            "violations": [{"category": "Formatting", "impact_score": 5, "reason": f"API Error: {str(e)}", "fix": "Retry Audit"}],
             "adapted_text": source_text, 
             "change_log": [],
             "audit_metadata": {"latency_sec": 0, "tone_shift": 0, "confidence_score": 50}

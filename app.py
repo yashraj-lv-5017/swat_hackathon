@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from sentinel import run_sentinel_audit
+from sentinel import run_sentinel_audit, CHANNEL_CONFIG # Imported Config
 from fpdf import FPDF
 from fpdf.enums import XPos, YPos
 import diff_match_patch as dmp_module
@@ -92,8 +92,18 @@ def create_pdf_report(report, audience, complexity_delta):
 # --- 4. SIDEBAR ---
 with st.sidebar:
     st.header("🎯 Context Matrix")
-    channel = st.selectbox("Distribution Channel", ["LinkedIn post", "Marketing email", "Press Release"])
+    # Updated to pull exactly from the table configuration
+    channel = st.selectbox("Distribution Channel", list(CHANNEL_CONFIG.keys()))
     audience = st.selectbox("Target Stakeholder", ["Executive", "Practitioner", "Technical Lead"])
+    
+    st.divider()
+    # NEW: Channel Logic Viewer (Shows the table constraints to the user)
+    with st.expander("📝 Channel Style Guide"):
+        cfg = CHANNEL_CONFIG[channel]
+        st.write(f"**Max Length:** {cfg['max']} words")
+        st.write(f"**Paragraphs:** {cfg['style']}")
+        st.write(f"**Approved CTA:** {cfg['cta'] if cfg['cta'] else 'N/A'}")
+
     st.divider()
     st.subheader("📋 Session History")
     if st.session_state.audit_history:
@@ -119,9 +129,23 @@ if st.button("🚀 Execute Strategic Audit", use_container_width=True):
     if not source_text:
         st.error("Buffer is empty. Please provide text or upload a file.")
     else:
+        # --- NEW: HARD-ENFORCEMENT TRUNCATION LOGIC ---
+        limits = CHANNEL_CONFIG.get(channel)
+        max_allowed = limits['max']
+        
+        words = source_text.split()
+        actual_count = len(words)
+
+        # Trimming logic based on the table's specific Max Length
+        if actual_count > max_allowed:
+            trimmed_words = words[:max_allowed]
+            source_text = " ".join(trimmed_words)
+            st.warning(f"⚠️ **Governance Limit Reached:** {channel} allows a maximum of **{max_allowed}** words. Your content has been automatically trimmed from {actual_count} words to comply with brand standards.")
+        
+        # --- PROCEED WITH AUDIT (Using trimmed source_text) ---
         my_bar = st.progress(0, text="Initializing Audit Engine...")
         
-        # CORE CALL - Results stored in Session State to prevent reset on Voice click
+        # CORE CALL
         st.session_state.report = run_sentinel_audit(source_text, channel, audience)
         
         orig_comp = analyze_complexity(source_text)
@@ -138,7 +162,7 @@ if st.button("🚀 Execute Strategic Audit", use_container_width=True):
         my_bar.progress(100, text="✅ Audit Complete")
         time.sleep(0.5); my_bar.empty()
 
-# --- 7. DISPLAY RESULTS (Persistent View) ---
+# --- 7. DISPLAY RESULTS ---
 if 'report' in st.session_state:
     report = st.session_state.report
     comp_delta = st.session_state.comp_delta
@@ -152,15 +176,14 @@ if 'report' in st.session_state:
     m3.metric("Linguistic Shift", f"{new_comp}", delta=comp_delta)
     m4.metric("Violations", len(report.get('violations', [])))
 
-    # --- NEW: BUSINESS IMPACT ANALYTICS (ROI) ---
+    # --- BUSINESS IMPACT ANALYTICS (ROI) ---
     st.divider()
     st.subheader("💼 Enterprise Business Impact")
     
     audit_count = len(st.session_state.audit_history)
-    time_saved = audit_count * 0.75  # Assume 45 mins saved per manual audit
-    dollars_saved = time_saved * 80   # Assume $80/hr labor cost
+    time_saved = audit_count * 0.75 
+    dollars_saved = time_saved * 80  
     
-    # Market Readiness Logic
     target_comp = 5.5 if audience == "Executive" else 8.0
     market_score = max(0, 100 - (abs(new_comp - target_comp) * 15))
 
@@ -199,7 +222,7 @@ if 'report' in st.session_state:
     with col_view:
         render_diff(source_text, report.get('adapted_text', ''))
     with col_voice:
-        st.write("") # UI Padding
+        st.write("") 
         if st.button("🔊 Play Voice"):
             speak_text(report.get('adapted_text', ''))
             st.success("Playing Audio...")

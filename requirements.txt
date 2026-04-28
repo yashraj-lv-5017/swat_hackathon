@@ -1,3 +1,15 @@
+streamlit
+pandas
+plotly
+openai
+azure-openai
+qdrant-client
+python-dotenv
+fpdf2
+pdfplumber
+python-docx
+diff-match-patch
+
 altair==6.1.0
 annotated-types==0.7.0
 anyio==4.13.0
